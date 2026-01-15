@@ -55,7 +55,7 @@ def set_cell_bg(cell, hex_color):
     shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), hex_color))
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
-# --- 輔助函式：建立簽名區 (含提醒文字) ---
+# --- 輔助函式：建立簽名區 ---
 def add_signature_block(doc):
     doc.add_paragraph("\n") 
     
@@ -81,21 +81,15 @@ def add_signature_block(doc):
     set_cell_text(sig_table.cell(1, 0), " 導師簽名")
     set_cell_text(sig_table.cell(1, 1), " 衛生組核章")
 
-    # --- 新增：底部提醒文字 ---
-    # 增加一點間距
+    # 底部提醒文字
     p = doc.add_paragraph()
     p.paragraph_format.space_before = Pt(12) 
-    
     reminder_text = "各位同學好：打掃完之後，先由班上正副衛生股長檢查以後，再請導師簽名。最後請班上同學打電話至衛生組(分機312)，衛生組將會派衛生糾察到場，最後由衛生糾察檢查確認打勾，「由衛生糾察帶回學務處衛生組」。"
-    
     run = p.add_run(reminder_text)
-    run.font.size = Pt(12) # 設定字體大小
+    run.font.size = Pt(12) 
     run.font.name = 'Times New Roman'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
-    
-    # 設定靠左對齊 (或左右對齊看您喜好，這裡預設靠左)
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-
 
 # --- 輔助函式：建立任務清單區 ---
 def add_task_section(doc, tasks_df, standards_grouped, title_text):
@@ -139,19 +133,21 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
         if check_type in standards_grouped.groups:
             type_df = standards_grouped.get_group(check_type)
             
-            table = doc.add_table(rows=1, cols=2)
+            # 【修正】改回 3 欄 (子分類, 項目, 確認)
+            table = doc.add_table(rows=1, cols=3)
             table.style = 'Table Grid'
             table.allow_autofit = False 
             
+            # --- 表頭設定 ---
             hdr_cells = table.rows[0].cells
-            hdr_cells[0].text = '檢查項目'
-            hdr_cells[1].text = '確認'
-            hdr_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            hdr_cells[0].text = '子分類'
+            hdr_cells[1].text = '檢查項目'
+            hdr_cells[2].text = '確認'
             
-            set_cell_bg(hdr_cells[0], "D9D9D9") 
-            set_cell_bg(hdr_cells[1], "D9D9D9")
-
+            # 設定表頭底色
             for cell in hdr_cells:
+                set_cell_bg(cell, "D9D9D9")
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
@@ -160,10 +156,15 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
                         run.font.name = 'Times New Roman'
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
             
-            table.columns[0].width = Cm(17.0) 
-            table.columns[1].width = Cm(1.5) 
-            hdr_cells[0].width = Cm(17.0)
-            hdr_cells[1].width = Cm(1.5)
+            # 設定欄寬 (總寬約 18.5 cm)
+            # 子分類 3.5cm | 項目 13.5cm | 確認 1.5cm
+            table.columns[0].width = Cm(3.5)
+            table.columns[1].width = Cm(13.5)
+            table.columns[2].width = Cm(1.5)
+            
+            hdr_cells[0].width = Cm(3.5)
+            hdr_cells[1].width = Cm(13.5)
+            hdr_cells[2].width = Cm(1.5)
 
             if '子分類' in type_df.columns:
                 type_df_sorted = type_df.sort_values(by=['子分類'], na_position='first')
@@ -174,24 +175,35 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
                 row_cells = table.add_row().cells
                 row_cells[0].height = Cm(1.0)
                 
-                row_cells[0].text = item_row.檢查細項
-                row_cells[0].width = Cm(17.0)
+                # 1. 子分類欄
+                sub_cat_text = str(item_row.子分類) if pd.notna(item_row.子分類) else ""
+                row_cells[0].text = sub_cat_text
+                row_cells[0].width = Cm(3.5)
                 row_cells[0].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                # 子分類置中對齊
+                row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
-                for paragraph in row_cells[0].paragraphs:
-                    paragraph.paragraph_format.left_indent = Pt(6) 
-                    for run in paragraph.runs:
-                        run.font.size = Pt(12)
-                        run.font.name = 'Times New Roman'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
-
-                row_cells[1].width = Cm(1.5)
+                # 2. 檢查項目欄
+                row_cells[1].text = item_row.檢查細項
+                row_cells[1].width = Cm(13.5)
                 row_cells[1].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 
-                p = row_cells[1].paragraphs[0]
+                # 3. 確認欄
+                row_cells[2].width = Cm(1.5)
+                row_cells[2].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                p = row_cells[2].paragraphs[0]
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 run = p.add_run("□")
                 run.font.size = Pt(16)
+
+                # 統一設定內容字型
+                for cell in row_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            if run.text != "□": # 方框維持自己的大小
+                                run.font.size = Pt(12)
+                            run.font.name = 'Times New Roman'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
         else:
             doc.add_paragraph(f"(未找到類型 {check_type} 的檢查標準)")
             
