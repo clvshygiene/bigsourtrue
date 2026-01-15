@@ -6,8 +6,9 @@ from docx import Document
 from docx.shared import Pt, Inches, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-from docx.enum.section import WD_SECTION # 👈 新增：控制分節符號
-from docx.oxml.ns import qn
+from docx.enum.section import WD_SECTION 
+from docx.oxml.ns import qn, nsdecls # 👈 新增 XML 處理工具
+from docx.oxml import parse_xml # 👈 新增 XML 解析工具
 
 # --- 頁面設定 ---
 st.set_page_config(page_title="校園掃區檢核系統", page_icon="🧹", layout="centered")
@@ -49,6 +50,14 @@ def load_data():
         st.error(f"❌ 資料讀取失敗！錯誤訊息：{e}")
         return None, None, None
 
+# --- 黑魔法函式：設定儲存格背景顏色 (Shading) ---
+def set_cell_bg(cell, hex_color):
+    """
+    hex_color: 例如 "D9D9D9" (淺灰)
+    """
+    shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), hex_color))
+    cell._tc.get_or_add_tcPr().append(shading_elm)
+
 # --- 輔助函式：建立簽名區 ---
 def add_signature_block(doc):
     doc.add_paragraph("\n") 
@@ -57,14 +66,14 @@ def add_signature_block(doc):
     sig_table.style = 'Table Grid'
     
     for row in sig_table.rows:
-        row.height = Cm(2.2) # 【美化】簽名格加高到 2.2 公分
+        row.height = Cm(2.2) 
         for cell in row.cells:
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     
     def set_cell_text(cell, text):
         cell.text = text
         for paragraph in cell.paragraphs:
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT # 靠左
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             for run in paragraph.runs:
                 run.font.size = Pt(12)
                 run.font.name = 'Times New Roman'
@@ -77,14 +86,18 @@ def add_signature_block(doc):
 
 # --- 輔助函式：建立任務清單區 ---
 def add_task_section(doc, tasks_df, standards_grouped, title_text):
+    # 主標題加強
     heading = doc.add_heading(title_text, level=1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    # 設定標題字型
     for run in heading.runs:
-        run.font.size = Pt(18)
+        run.font.size = Pt(20) # 加大
+        run.bold = True
         run.font.name = 'Times New Roman'
         run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
-        run.font.color.rgb = RGBColor(0, 0, 0) # 純黑
+        run.font.color.rgb = RGBColor(0, 0, 0)
+
+    # 增加一點段落後距離
+    heading.paragraph_format.space_after = Pt(12)
 
     for index, row in tasks_df.iterrows():
         bldg = str(row['大樓']) if pd.notna(row['大樓']) else ""
@@ -92,9 +105,14 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
         detail = str(row['詳細位置']) if pd.notna(row['詳細位置']) else ""
         full_name = f"{bldg} {floor} {detail}".strip()
         
+        # 掃區小標題
         h2 = doc.add_heading(f"📍 {full_name}", level=2)
+        h2.paragraph_format.space_before = Pt(18) # 讓每個掃區分開一點
+        h2.paragraph_format.space_after = Pt(6)
+        
         for run in h2.runs:
             run.font.size = Pt(14)
+            run.bold = True
             run.font.name = 'Times New Roman'
             run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
             run.font.color.rgb = RGBColor(0, 0, 0)
@@ -105,6 +123,7 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
             run = p.add_run(f"⚠️ 注意：{note}")
             run.font.color.rgb = RGBColor(255, 0, 0)
             run.font.size = Pt(12)
+            p.paragraph_format.space_after = Pt(6)
         
         check_type = row['檢查類型']
         if check_type in standards_grouped.groups:
@@ -114,18 +133,25 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
             table.style = 'Table Grid'
             table.allow_autofit = False 
             
+            # --- 表頭設定 ---
             hdr_cells = table.rows[0].cells
             hdr_cells[0].text = '檢查項目'
             hdr_cells[1].text = '確認'
             hdr_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             
-            # 【美化】表頭字型設定
+            # 設定表頭底色 (美化的關鍵！)
+            # D9D9D9 是標準的淺灰色，印出來很有質感
+            set_cell_bg(hdr_cells[0], "D9D9D9") 
+            set_cell_bg(hdr_cells[1], "D9D9D9")
+
             for cell in hdr_cells:
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
                         run.font.size = Pt(12)
                         run.bold = True
+                        run.font.name = 'Times New Roman'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
             
             table.columns[0].width = Cm(17.0) 
             table.columns[1].width = Cm(1.5) 
@@ -139,18 +165,17 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
 
             for item_row in type_df_sorted.itertuples():
                 row_cells = table.add_row().cells
-                
-                # 【美化】增加列高，讓畫面不要太擠
-                row_cells[0].height = Cm(1.0) 
+                row_cells[0].height = Cm(1.0) # 維持好按的高度
                 
                 row_cells[0].text = item_row.檢查細項
                 row_cells[0].width = Cm(17.0)
-                row_cells[0].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER # 垂直置中
+                row_cells[0].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 
-                # 設定檢查項目字型
                 for paragraph in row_cells[0].paragraphs:
+                    # 增加左縮排，讓文字不要貼著線
+                    paragraph.paragraph_format.left_indent = Pt(6) 
                     for run in paragraph.runs:
-                        run.font.size = Pt(12) # 字變大
+                        run.font.size = Pt(12)
                         run.font.name = 'Times New Roman'
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
 
@@ -160,7 +185,7 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
                 p = row_cells[1].paragraphs[0]
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 run = p.add_run("□")
-                run.font.size = Pt(16) # 方框變大
+                run.font.size = Pt(16)
         else:
             doc.add_paragraph(f"(未找到類型 {check_type} 的檢查標準)")
             
@@ -177,11 +202,8 @@ def append_class_content(doc, display_name, tasks_df, standards_grouped):
     if not df_indoor.empty:
         add_task_section(doc, df_indoor, standards_grouped, f"{display_name} - 內掃教室")
         
-        # 【關鍵修正】內掃結束後，如果要印外掃，強制從「下一個奇數頁」開始
-        # 這樣就能保證內掃自己一張紙 (正面內掃，背面空白)
         if not df_outdoor.empty:
             section = doc.add_section(WD_SECTION.ODD_PAGE)
-            # 新的 Section 必須重新設定邊界
             section.top_margin = Cm(1.27)
             section.bottom_margin = Cm(1.27)
             section.left_margin = Cm(1.27)
@@ -190,7 +212,6 @@ def append_class_content(doc, display_name, tasks_df, standards_grouped):
     # 2. 外掃頁
     if not df_outdoor.empty:
         add_task_section(doc, df_outdoor, standards_grouped, f"{display_name} - 外掃區域")
-        # 外掃結束後，由外層迴圈控制換班
 
 # --- 主程式 ---
 df_classes, df_tasks, df_standards = load_data()
@@ -215,12 +236,10 @@ if df_tasks is not None:
     st.sidebar.markdown("---")
     st.sidebar.header("🖨️ 行政專用：批次列印")
     
-    # 下載全校按鈕
     if st.sidebar.button("📥 下載「全校」合併 Word 檔"):
         with st.spinner("正在生成全校表單，請稍候..."):
             doc = Document()
             
-            # 設定第一頁邊界
             section = doc.sections[0]
             section.top_margin = Cm(1.27)
             section.bottom_margin = Cm(1.27)
@@ -241,8 +260,6 @@ if df_tasks is not None:
                 class_tasks = df_tasks[df_tasks['負責班級'] == class_id]
                 
                 if not class_tasks.empty:
-                    # 如果不是第一班，要先新增一個「奇數頁分節符號」
-                    # 這是最關鍵的一步！它會自動判斷要不要補白頁
                     if not first_class:
                         section = doc.add_section(WD_SECTION.ODD_PAGE)
                         section.top_margin = Cm(1.27)
