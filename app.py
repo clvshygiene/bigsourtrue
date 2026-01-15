@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
-from docx import Document # 用來產出 Word
-from docx.shared import Pt, Inches
+from docx import Document 
+from docx.shared import Pt, Inches, RGBColor  # 👈 新增 RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
@@ -16,7 +16,7 @@ st.title("🧹 114-2 校園大掃除檢核系統")
 def load_data():
     try:
         # 👇 請確認這裡填寫的是正確的 Google 試算表連結
-        google_sheet_url = "https://docs.google.com/spreadsheets/d/1jqpj-DOe1X2cf6cToWmtW19_0FdN3REioa34aXn4boA/edit?usp=sharing"
+        google_sheet_url = "https://docs.google.com/spreadsheets/d/您的ID/edit?usp=sharing"
         
         # 自動轉換為 Excel 下載連結
         if "/edit" in google_sheet_url:
@@ -48,14 +48,14 @@ def load_data():
         return df_classes, df_full, df_standards
         
     except Exception as e:
-        st.error("❌ 資料讀取失敗！")
+        st.error(f"❌ 資料讀取失敗！錯誤訊息：{e}")
         return None, None, None
 
 # --- 2. 產生 Word 文件的函式 ---
 def generate_docx(class_name, tasks_df, standards_df):
     doc = Document()
     
-    # 設定中文字型 (這是讓 Word 顯示標楷體或新細明體的關鍵)
+    # 設定中文字型
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
@@ -87,14 +87,15 @@ def generate_docx(class_name, tasks_df, standards_df):
         if pd.notna(note) and str(note).strip() != "":
             p = doc.add_paragraph()
             run = p.add_run(f"⚠️ 注意：{note}")
-            run.font.color.rgb = pd.io.common.colors.RGB(255, 0, 0) # 紅色字
+            # 👇 【修正】這裡改成正確的 RGBColor
+            run.font.color.rgb = RGBColor(255, 0, 0) 
         
         # 建立檢查表格
         check_type = row['檢查類型']
         if check_type in standards_grouped.groups:
             type_df = standards_grouped.get_group(check_type)
             
-            # 建立表格 (寬度自動調整)
+            # 建立表格
             table = doc.add_table(rows=1, cols=3)
             table.style = 'Table Grid'
             hdr_cells = table.rows[0].cells
@@ -104,7 +105,6 @@ def generate_docx(class_name, tasks_df, standards_df):
             
             # 填入資料
             if '子分類' in type_df.columns:
-                # 依照子分類排序
                 type_df_sorted = type_df.sort_values(by=['子分類'], na_position='first')
                 for item_row in type_df_sorted.itertuples():
                     row_cells = table.add_row().cells
@@ -124,23 +124,20 @@ def generate_docx(class_name, tasks_df, standards_df):
         doc.add_paragraph("\n") # 空行
 
     # --- 簽名區塊 ---
-    doc.add_page_break() # 簽名頁或放在最下面
+    doc.add_page_break()
     doc.add_heading("簽名確認區", level=1)
     
     sig_table = doc.add_table(rows=3, cols=2)
     sig_table.style = 'Table Grid'
     
-    # 調整表格高度
     for row in sig_table.rows:
         row.height = Inches(0.8)
     
-    # 填寫內容
     sig_table.cell(0, 0).text = "衛生股長 (1)"
     sig_table.cell(0, 1).text = "衛生股長 (2)"
     sig_table.cell(1, 0).text = "衛生糾察 (1)"
     sig_table.cell(1, 1).text = "衛生糾察 (2)"
     sig_table.cell(2, 0).text = "導師簽名"
-    # 合併導師欄位
     a = sig_table.cell(2, 0)
     b = sig_table.cell(2, 1)
     a.merge(b)
@@ -153,7 +150,6 @@ df_classes, df_tasks, df_standards = load_data()
 if df_tasks is not None:
     st.sidebar.header("📍 班級登入")
     
-    # 側邊欄邏輯
     if '年級' in df_classes.columns:
         all_grades = sorted(df_classes['年級'].astype(str).unique())
         selected_grade = st.sidebar.selectbox("請選擇年級", all_grades)
@@ -172,9 +168,7 @@ if df_tasks is not None:
 
     selected_option = st.sidebar.selectbox("請選擇班級", list(class_options.keys()))
     current_class_id = class_options[selected_option]
-    current_class_name = selected_option.split(" - ")[-1] # 取得班級名稱 (如 餐飲科)
 
-    # 主畫面
     st.info(f"👋 歡迎 **{selected_option}**")
     
     my_tasks = df_tasks[df_tasks['負責班級'] == current_class_id]
@@ -184,7 +178,6 @@ if df_tasks is not None:
         st.markdown("### 🖨️ 紙本檢核表下載")
         st.write("點擊下方按鈕下載 Word 檔，印出後完成簽名。")
         
-        # 產生 Word 檔並存入記憶體
         doc = generate_docx(selected_option, my_tasks, df_standards)
         bio = io.BytesIO()
         doc.save(bio)
@@ -197,7 +190,7 @@ if df_tasks is not None:
         )
         st.markdown("---")
 
-    # --- 數位預覽區 (已修復 key 重複問題) ---
+    # --- 數位預覽區 ---
     st.markdown("### 📱 數位預覽 (僅供參考)")
     standards_grouped = df_standards.groupby('檢查類型')
 
@@ -206,9 +199,9 @@ if df_tasks is not None:
     else:
         with st.form(key='preview_form'):
             for index, row in my_tasks.iterrows():
-                bldg = row['大樓'] if pd.notna(row['大樓']) else ""
-                floor = row['樓層'] if pd.notna(row['樓層']) else ""
-                detail = row['詳細位置'] if pd.notna(row['詳細位置']) else ""
+                bldg = str(row['大樓']) if pd.notna(row['大樓']) else ""
+                floor = str(row['樓層']) if pd.notna(row['樓層']) else ""
+                detail = str(row['詳細位置']) if pd.notna(row['詳細位置']) else ""
                 full_name = f"{bldg} {floor} {detail}".strip()
                 
                 check_type = row['檢查類型']
@@ -229,10 +222,7 @@ if df_tasks is not None:
                                 st.markdown(f"**🔹 {sub_cat}**")
                             
                             cols = st.columns(2)
-                            # 🔹 這裡加入了全域 index 來保證 Key 絕對唯一
                             for idx, item_row in enumerate(items_df.itertuples()):
-                                # Key 格式：班級_地點_子分類_項目_索引
-                                # 這樣就算項目名稱完全一樣，也不會重複
                                 unique_key = f"{current_class_id}_{location_id}_{sub_cat}_{item_row.檢查細項}_{idx}"
                                 with cols[idx % 2]:
                                     st.checkbox(item_row.檢查細項, key=unique_key)
@@ -244,5 +234,4 @@ if df_tasks is not None:
                 
                 st.markdown("---")
             
-
             st.form_submit_button("數位送出 (測試用)")
