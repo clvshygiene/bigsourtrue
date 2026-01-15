@@ -5,6 +5,7 @@ import io
 from docx import Document 
 from docx.shared import Pt, Inches, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT # 👈 新增：控制垂直置中
 from docx.oxml.ns import qn
 
 # --- 頁面設定 ---
@@ -47,45 +48,39 @@ def load_data():
         st.error(f"❌ 資料讀取失敗！錯誤訊息：{e}")
         return None, None, None
 
-# --- 輔助函式：建立簽名區 (2x2 矩陣) ---
+# --- 輔助函式：建立簽名區 (修正對齊版) ---
 def add_signature_block(doc):
-    doc.add_paragraph("\n") # 隔開一點距離
+    doc.add_paragraph("\n") 
     
-    # 建立 2x2 表格 (衛生股長, 衛生糾察 / 導師, 衛生組)
     sig_table = doc.add_table(rows=2, cols=2)
     sig_table.style = 'Table Grid'
     
-    # 設定列高 (簽名要有空間)
     for row in sig_table.rows:
-        row.height = Cm(2.0) # 設定約 2 公分高，夠簽名
+        row.height = Cm(2.0)
+        # 【修正】讓每一格都垂直置中
+        for cell in row.cells:
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     
-    # 填入標題 (左上角小字或是直接置中)
-    # 這裡採用：標題 + 換行預留空間的方式
-    
-    # 第一列
-    c1 = sig_table.cell(0, 0)
-    c1.text = "衛生股長"
-    c1.vertical_alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    c2 = sig_table.cell(0, 1)
-    c2.text = "衛生糾察"
-    
-    # 第二列
-    c3 = sig_table.cell(1, 0)
-    c3.text = "導師簽名"
-    
-    c4 = sig_table.cell(1, 1)
-    c4.text = "衛生組核章"
+    # 填入文字並設定水平置中
+    def set_cell_text(cell, text):
+        cell.text = text
+        # 設定水平置中
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            # 字體稍微加粗或放大一點點，看起來更正式
+            for run in paragraph.runs:
+                run.font.size = Pt(12)
+
+    set_cell_text(sig_table.cell(0, 0), "衛生股長")
+    set_cell_text(sig_table.cell(0, 1), "衛生糾察")
+    set_cell_text(sig_table.cell(1, 0), "導師簽名")
+    set_cell_text(sig_table.cell(1, 1), "衛生組核章")
 
 # --- 輔助函式：建立任務清單區 ---
 def add_task_section(doc, tasks_df, standards_grouped, title_text):
-    # 標題
     heading = doc.add_heading(title_text, level=1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # 【修正】移除列印日期
-    # p = doc.add_paragraph() ... (已刪除)
-
     for index, row in tasks_df.iterrows():
         bldg = str(row['大樓']) if pd.notna(row['大樓']) else ""
         floor = str(row['樓層']) if pd.notna(row['樓層']) else ""
@@ -104,27 +99,18 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
         if check_type in standards_grouped.groups:
             type_df = standards_grouped.get_group(check_type)
             
-            # 【視覺改良】表格設定
             table = doc.add_table(rows=1, cols=2)
             table.style = 'Table Grid'
-            # ⛔ 重要：關閉自動調整，這樣我們設定的寬度才會生效
             table.allow_autofit = False 
             
-            # 設定表頭
             hdr_cells = table.rows[0].cells
             hdr_cells[0].text = '檢查項目'
             hdr_cells[1].text = '確認'
-            
-            # 置中表頭
             hdr_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # 【關鍵】設定欄寬
-            # 總寬度約 18.5cm (A4 21cm - 左右邊界 1.27*2)
-            # 設定確認欄只要 1.5 cm，剩下給項目欄
+            # 設定寬度
             table.columns[0].width = Cm(17.0) 
             table.columns[1].width = Cm(1.5) 
-            
-            # 確保第一列的儲存格寬度也被鎖定 (python-docx 的特性)
             hdr_cells[0].width = Cm(17.0)
             hdr_cells[1].width = Cm(1.5)
 
@@ -137,15 +123,13 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
                 row_cells = table.add_row().cells
                 row_cells[0].text = item_row.檢查細項
                 
-                # 調整欄寬 (每一列都要設定，確保整齊)
                 row_cells[0].width = Cm(17.0)
                 row_cells[1].width = Cm(1.5)
                 
-                # 確認格置中
                 p = row_cells[1].paragraphs[0]
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 run = p.add_run("□")
-                run.font.size = Pt(14) # 方框稍微大一點點比較好勾
+                run.font.size = Pt(14)
         else:
             doc.add_paragraph(f"(未找到類型 {check_type} 的檢查標準)")
             
@@ -153,45 +137,29 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
 
     add_signature_block(doc)
 
-
-# --- 2. 產生 Word 文件的核心函式 ---
-def generate_docx(display_name, tasks_df, standards_df):
-    doc = Document()
-    
-    # 版面邊界設為「窄」
-    section = doc.sections[0]
-    section.top_margin = Cm(1.27)
-    section.bottom_margin = Cm(1.27)
-    section.left_margin = Cm(1.27)
-    section.right_margin = Cm(1.27)
-    
-    style = doc.styles['Normal']
-    style.font.name = 'Times New Roman'
-    style.element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
-    
-    standards_grouped = standards_df.groupby('檢查類型')
-
+# --- 核心邏輯：生成單一班級的內容 (append 到 doc) ---
+def append_class_content(doc, display_name, tasks_df, standards_grouped):
     df_indoor = tasks_df[tasks_df['檢查類型'] == '內掃教室']
     df_outdoor = tasks_df[tasks_df['檢查類型'] != '內掃教室']
 
-    # --- 第一部分：內掃教室 ---
+    # 內掃頁
     if not df_indoor.empty:
         add_task_section(doc, df_indoor, standards_grouped, f"{display_name} - 內掃教室")
     
-    # --- 分頁 ---
+    # 內外掃中間的分頁
     if not df_indoor.empty and not df_outdoor.empty:
         doc.add_page_break()
     
-    # --- 第二部分：外掃區 ---
+    # 外掃頁
     if not df_outdoor.empty:
         add_task_section(doc, df_outdoor, standards_grouped, f"{display_name} - 外掃區域")
-
-    return doc
 
 # --- 主程式 ---
 df_classes, df_tasks, df_standards = load_data()
 
 if df_tasks is not None:
+    
+    # --- 側邊欄 ---
     st.sidebar.header("📍 班級登入")
     
     if '年級' in df_classes.columns:
@@ -207,10 +175,61 @@ if df_tasks is not None:
         for index, row in classes_filter.iterrows()
     }
     
-    if not class_options:
-        st.stop()
+    # --- 批次下載專區 (Admin) ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("🖨️ 行政專用：批次列印")
+    
+    # 下載全校按鈕
+    if st.sidebar.button("📥 下載「全校」合併 Word 檔"):
+        with st.spinner("正在生成全校表單，請稍候..."):
+            doc = Document()
+            # 設定邊界
+            section = doc.sections[0]
+            section.top_margin = Cm(1.27)
+            section.bottom_margin = Cm(1.27)
+            section.left_margin = Cm(1.27)
+            section.right_margin = Cm(1.27)
+            
+            # 字型設定
+            style = doc.styles['Normal']
+            style.font.name = 'Times New Roman'
+            style.element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
 
-    selected_option = st.sidebar.selectbox("請選擇班級", list(class_options.keys()))
+            standards_grouped = df_standards.groupby('檢查類型')
+            
+            # 取得全校班級清單 (排序)
+            all_classes_sorted = df_classes.sort_values(by=['班級代碼'])
+            
+            # 迴圈生成
+            first_page = True
+            for idx, class_row in all_classes_sorted.iterrows():
+                class_id = class_row['班級代碼']
+                class_display = class_row['顯示名稱']
+                
+                # 篩選該班任務
+                class_tasks = df_tasks[df_tasks['負責班級'] == class_id]
+                
+                if not class_tasks.empty:
+                    # 如果不是第一頁，且上一班有內容，就要換頁
+                    if not first_page:
+                        doc.add_page_break()
+                    
+                    append_class_content(doc, class_display, class_tasks, standards_grouped)
+                    first_page = False
+            
+            # 儲存
+            bio = io.BytesIO()
+            doc.save(bio)
+            
+            st.sidebar.download_button(
+                label="✅ 點此下載全校檔案",
+                data=bio.getvalue(),
+                file_name=f"全校大掃除檢核表_合併檔_{datetime.now().strftime('%Y%m%d')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+
+    # --- 右側主畫面 (單一班級檢視) ---
+    selected_option = st.sidebar.selectbox("請選擇班級 (個別檢視)", list(class_options.keys()))
     current_class_id = class_options[selected_option]
     
     if " - " in selected_option:
@@ -221,28 +240,37 @@ if df_tasks is not None:
     st.info(f"👋 歡迎 **{current_display_name}**")
     
     my_tasks = df_tasks[df_tasks['負責班級'] == current_class_id]
+    standards_grouped = df_standards.groupby('檢查類型')
     
-    # --- Word 下載按鈕 ---
+    # 單一班級下載按鈕
     if not my_tasks.empty:
-        st.markdown("### 🖨️ 紙本檢核表下載")
-        st.write("點擊下方按鈕下載 Word 檔。檔案已自動分為「內掃」與「外掃」兩頁。")
+        st.markdown("### 🖨️ 紙本檢核表下載 (單班)")
         
-        doc = generate_docx(current_display_name, my_tasks, df_standards)
+        doc = Document()
+        section = doc.sections[0]
+        section.top_margin = Cm(1.27)
+        section.bottom_margin = Cm(1.27)
+        section.left_margin = Cm(1.27)
+        section.right_margin = Cm(1.27)
+        style = doc.styles['Normal']
+        style.font.name = 'Times New Roman'
+        style.element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
+        
+        append_class_content(doc, current_display_name, my_tasks, standards_grouped)
+        
         bio = io.BytesIO()
         doc.save(bio)
         
         st.download_button(
-            label="📥 下載 Word 檢核表 (.docx)",
+            label=f"📥 下載 {current_display_name} Word 檔",
             data=bio.getvalue(),
             file_name=f"{current_display_name}_大掃除檢核表.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         st.markdown("---")
 
-    # --- 數位預覽區 ---
+    # 數位預覽
     st.markdown("### 📱 數位預覽")
-    standards_grouped = df_standards.groupby('檢查類型')
-
     if my_tasks.empty:
         st.warning("目前無分配掃區。")
     else:
@@ -284,4 +312,3 @@ if df_tasks is not None:
                 st.markdown("---")
             
             st.form_submit_button("數位送出 (測試用)")
-
