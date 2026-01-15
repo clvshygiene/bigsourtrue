@@ -7,8 +7,8 @@ from docx.shared import Pt, Inches, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.section import WD_SECTION 
-from docx.oxml.ns import qn, nsdecls # 👈 新增 XML 處理工具
-from docx.oxml import parse_xml # 👈 新增 XML 解析工具
+from docx.oxml.ns import qn, nsdecls 
+from docx.oxml import parse_xml 
 
 # --- 頁面設定 ---
 st.set_page_config(page_title="校園掃區檢核系統", page_icon="🧹", layout="centered")
@@ -50,15 +50,12 @@ def load_data():
         st.error(f"❌ 資料讀取失敗！錯誤訊息：{e}")
         return None, None, None
 
-# --- 黑魔法函式：設定儲存格背景顏色 (Shading) ---
+# --- 黑魔法函式：設定儲存格背景顏色 ---
 def set_cell_bg(cell, hex_color):
-    """
-    hex_color: 例如 "D9D9D9" (淺灰)
-    """
     shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), hex_color))
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
-# --- 輔助函式：建立簽名區 ---
+# --- 輔助函式：建立簽名區 (含提醒文字) ---
 def add_signature_block(doc):
     doc.add_paragraph("\n") 
     
@@ -84,19 +81,33 @@ def add_signature_block(doc):
     set_cell_text(sig_table.cell(1, 0), " 導師簽名")
     set_cell_text(sig_table.cell(1, 1), " 衛生組核章")
 
+    # --- 新增：底部提醒文字 ---
+    # 增加一點間距
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(12) 
+    
+    reminder_text = "各位同學好：打掃完之後，先由班上正副衛生股長檢查以後，再請導師簽名。最後請班上同學打電話至衛生組(分機312)，衛生組將會派衛生糾察到場，最後由衛生糾察檢查確認打勾，「由衛生糾察帶回學務處衛生組」。"
+    
+    run = p.add_run(reminder_text)
+    run.font.size = Pt(12) # 設定字體大小
+    run.font.name = 'Times New Roman'
+    run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
+    
+    # 設定靠左對齊 (或左右對齊看您喜好，這裡預設靠左)
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+
 # --- 輔助函式：建立任務清單區 ---
 def add_task_section(doc, tasks_df, standards_grouped, title_text):
-    # 主標題加強
     heading = doc.add_heading(title_text, level=1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in heading.runs:
-        run.font.size = Pt(20) # 加大
+        run.font.size = Pt(20) 
         run.bold = True
         run.font.name = 'Times New Roman'
         run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
         run.font.color.rgb = RGBColor(0, 0, 0)
 
-    # 增加一點段落後距離
     heading.paragraph_format.space_after = Pt(12)
 
     for index, row in tasks_df.iterrows():
@@ -105,9 +116,8 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
         detail = str(row['詳細位置']) if pd.notna(row['詳細位置']) else ""
         full_name = f"{bldg} {floor} {detail}".strip()
         
-        # 掃區小標題
         h2 = doc.add_heading(f"📍 {full_name}", level=2)
-        h2.paragraph_format.space_before = Pt(18) # 讓每個掃區分開一點
+        h2.paragraph_format.space_before = Pt(18) 
         h2.paragraph_format.space_after = Pt(6)
         
         for run in h2.runs:
@@ -133,14 +143,11 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
             table.style = 'Table Grid'
             table.allow_autofit = False 
             
-            # --- 表頭設定 ---
             hdr_cells = table.rows[0].cells
             hdr_cells[0].text = '檢查項目'
             hdr_cells[1].text = '確認'
             hdr_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             
-            # 設定表頭底色 (美化的關鍵！)
-            # D9D9D9 是標準的淺灰色，印出來很有質感
             set_cell_bg(hdr_cells[0], "D9D9D9") 
             set_cell_bg(hdr_cells[1], "D9D9D9")
 
@@ -165,14 +172,13 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
 
             for item_row in type_df_sorted.itertuples():
                 row_cells = table.add_row().cells
-                row_cells[0].height = Cm(1.0) # 維持好按的高度
+                row_cells[0].height = Cm(1.0)
                 
                 row_cells[0].text = item_row.檢查細項
                 row_cells[0].width = Cm(17.0)
                 row_cells[0].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 
                 for paragraph in row_cells[0].paragraphs:
-                    # 增加左縮排，讓文字不要貼著線
                     paragraph.paragraph_format.left_indent = Pt(6) 
                     for run in paragraph.runs:
                         run.font.size = Pt(12)
