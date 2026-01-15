@@ -6,6 +6,7 @@ from docx import Document
 from docx.shared import Pt, Inches, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.section import WD_SECTION # 👈 新增：控制分節符號
 from docx.oxml.ns import qn
 
 # --- 頁面設定 ---
@@ -48,7 +49,7 @@ def load_data():
         st.error(f"❌ 資料讀取失敗！錯誤訊息：{e}")
         return None, None, None
 
-# --- 輔助函式：建立簽名區 (靠左置中版) ---
+# --- 輔助函式：建立簽名區 ---
 def add_signature_block(doc):
     doc.add_paragraph("\n") 
     
@@ -56,21 +57,20 @@ def add_signature_block(doc):
     sig_table.style = 'Table Grid'
     
     for row in sig_table.rows:
-        row.height = Cm(2.0)
-        # 設定垂直置中
+        row.height = Cm(2.2) # 【美化】簽名格加高到 2.2 公分
         for cell in row.cells:
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     
-    # 填入文字並設定【靠左置中】
     def set_cell_text(cell, text):
         cell.text = text
         for paragraph in cell.paragraphs:
-            # 【修正】改為靠左對齊，方便簽名
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT # 靠左
             for run in paragraph.runs:
                 run.font.size = Pt(12)
+                run.font.name = 'Times New Roman'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
 
-    set_cell_text(sig_table.cell(0, 0), " 衛生股長") # 前面加個空格比較不貼邊
+    set_cell_text(sig_table.cell(0, 0), " 衛生股長") 
     set_cell_text(sig_table.cell(0, 1), " 衛生糾察")
     set_cell_text(sig_table.cell(1, 0), " 導師簽名")
     set_cell_text(sig_table.cell(1, 1), " 衛生組核章")
@@ -79,20 +79,32 @@ def add_signature_block(doc):
 def add_task_section(doc, tasks_df, standards_grouped, title_text):
     heading = doc.add_heading(title_text, level=1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
+    # 設定標題字型
+    for run in heading.runs:
+        run.font.size = Pt(18)
+        run.font.name = 'Times New Roman'
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
+        run.font.color.rgb = RGBColor(0, 0, 0) # 純黑
+
     for index, row in tasks_df.iterrows():
         bldg = str(row['大樓']) if pd.notna(row['大樓']) else ""
         floor = str(row['樓層']) if pd.notna(row['樓層']) else ""
         detail = str(row['詳細位置']) if pd.notna(row['詳細位置']) else ""
         full_name = f"{bldg} {floor} {detail}".strip()
         
-        doc.add_heading(f"📍 {full_name}", level=2)
+        h2 = doc.add_heading(f"📍 {full_name}", level=2)
+        for run in h2.runs:
+            run.font.size = Pt(14)
+            run.font.name = 'Times New Roman'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
+            run.font.color.rgb = RGBColor(0, 0, 0)
         
         note = row['特別注意事項']
         if pd.notna(note) and str(note).strip() != "":
             p = doc.add_paragraph()
             run = p.add_run(f"⚠️ 注意：{note}")
             run.font.color.rgb = RGBColor(255, 0, 0)
+            run.font.size = Pt(12)
         
         check_type = row['檢查類型']
         if check_type in standards_grouped.groups:
@@ -106,8 +118,15 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
             hdr_cells[0].text = '檢查項目'
             hdr_cells[1].text = '確認'
             hdr_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            # 設定寬度
+            
+            # 【美化】表頭字型設定
+            for cell in hdr_cells:
+                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = Pt(12)
+                        run.bold = True
+            
             table.columns[0].width = Cm(17.0) 
             table.columns[1].width = Cm(1.5) 
             hdr_cells[0].width = Cm(17.0)
@@ -120,15 +139,28 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
 
             for item_row in type_df_sorted.itertuples():
                 row_cells = table.add_row().cells
-                row_cells[0].text = item_row.檢查細項
                 
+                # 【美化】增加列高，讓畫面不要太擠
+                row_cells[0].height = Cm(1.0) 
+                
+                row_cells[0].text = item_row.檢查細項
                 row_cells[0].width = Cm(17.0)
+                row_cells[0].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER # 垂直置中
+                
+                # 設定檢查項目字型
+                for paragraph in row_cells[0].paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = Pt(12) # 字變大
+                        run.font.name = 'Times New Roman'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
+
                 row_cells[1].width = Cm(1.5)
+                row_cells[1].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 
                 p = row_cells[1].paragraphs[0]
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 run = p.add_run("□")
-                run.font.size = Pt(14)
+                run.font.size = Pt(16) # 方框變大
         else:
             doc.add_paragraph(f"(未找到類型 {check_type} 的檢查標準)")
             
@@ -136,7 +168,7 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
 
     add_signature_block(doc)
 
-# --- 核心邏輯：生成單一班級的內容 (含雙面列印補白頁邏輯) ---
+# --- 核心邏輯：生成單一班級的內容 ---
 def append_class_content(doc, display_name, tasks_df, standards_grouped):
     df_indoor = tasks_df[tasks_df['檢查類型'] == '內掃教室']
     df_outdoor = tasks_df[tasks_df['檢查類型'] != '內掃教室']
@@ -145,24 +177,20 @@ def append_class_content(doc, display_name, tasks_df, standards_grouped):
     if not df_indoor.empty:
         add_task_section(doc, df_indoor, standards_grouped, f"{display_name} - 內掃教室")
         
-        # 【修正】內掃結束後，強制補一個空白頁 (為了雙面列印)
+        # 【關鍵修正】內掃結束後，如果要印外掃，強制從「下一個奇數頁」開始
+        # 這樣就能保證內掃自己一張紙 (正面內掃，背面空白)
         if not df_outdoor.empty:
-            doc.add_page_break() # 結束內掃頁 (現在在第1頁背面，準備印第2頁)
-            
-            # 加入一個空白段落，確保 Word 知道這一頁是存在的
-            p = doc.add_paragraph("") 
-            
-            doc.add_page_break() # 結束空白頁 (現在準備印第2張紙的正面)
+            section = doc.add_section(WD_SECTION.ODD_PAGE)
+            # 新的 Section 必須重新設定邊界
+            section.top_margin = Cm(1.27)
+            section.bottom_margin = Cm(1.27)
+            section.left_margin = Cm(1.27)
+            section.right_margin = Cm(1.27)
     
     # 2. 外掃頁
     if not df_outdoor.empty:
         add_task_section(doc, df_outdoor, standards_grouped, f"{display_name} - 外掃區域")
-        
-        # 【修正】外掃結束後，也補一個空白頁 (確保下一班從新的一張紙開始)
-        # 這樣 A班外掃(正面) -> 背面空白 -> B班內掃(正面)
-        doc.add_page_break() 
-        p = doc.add_paragraph("") 
-        # 注意：這裡不加最後一個 page_break，交由迴圈控制，或者讓它自然留白
+        # 外掃結束後，由外層迴圈控制換班
 
 # --- 主程式 ---
 df_classes, df_tasks, df_standards = load_data()
@@ -191,6 +219,8 @@ if df_tasks is not None:
     if st.sidebar.button("📥 下載「全校」合併 Word 檔"):
         with st.spinner("正在生成全校表單，請稍候..."):
             doc = Document()
+            
+            # 設定第一頁邊界
             section = doc.sections[0]
             section.top_margin = Cm(1.27)
             section.bottom_margin = Cm(1.27)
@@ -204,17 +234,24 @@ if df_tasks is not None:
             standards_grouped = df_standards.groupby('檢查類型')
             all_classes_sorted = df_classes.sort_values(by=['班級代碼'])
             
+            first_class = True
             for idx, class_row in all_classes_sorted.iterrows():
                 class_id = class_row['班級代碼']
                 class_display = class_row['顯示名稱']
                 class_tasks = df_tasks[df_tasks['負責班級'] == class_id]
                 
                 if not class_tasks.empty:
-                    # 每一班都呼叫生成函式 (函式內已經包含補白頁邏輯)
-                    append_class_content(doc, class_display, class_tasks, standards_grouped)
+                    # 如果不是第一班，要先新增一個「奇數頁分節符號」
+                    # 這是最關鍵的一步！它會自動判斷要不要補白頁
+                    if not first_class:
+                        section = doc.add_section(WD_SECTION.ODD_PAGE)
+                        section.top_margin = Cm(1.27)
+                        section.bottom_margin = Cm(1.27)
+                        section.left_margin = Cm(1.27)
+                        section.right_margin = Cm(1.27)
                     
-                    # 確保班級之間有分頁 (因為 append_class_content 結尾可能沒有強制分頁到下一張紙)
-                    doc.add_page_break()
+                    append_class_content(doc, class_display, class_tasks, standards_grouped)
+                    first_class = False
 
             bio = io.BytesIO()
             doc.save(bio)
