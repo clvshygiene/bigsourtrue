@@ -5,7 +5,7 @@ import io
 from docx import Document 
 from docx.shared import Pt, Inches, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT # 👈 新增：控制垂直置中
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml.ns import qn
 
 # --- 頁面設定 ---
@@ -48,7 +48,7 @@ def load_data():
         st.error(f"❌ 資料讀取失敗！錯誤訊息：{e}")
         return None, None, None
 
-# --- 輔助函式：建立簽名區 (修正對齊版) ---
+# --- 輔助函式：建立簽名區 (靠左置中版) ---
 def add_signature_block(doc):
     doc.add_paragraph("\n") 
     
@@ -57,24 +57,23 @@ def add_signature_block(doc):
     
     for row in sig_table.rows:
         row.height = Cm(2.0)
-        # 【修正】讓每一格都垂直置中
+        # 設定垂直置中
         for cell in row.cells:
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     
-    # 填入文字並設定水平置中
+    # 填入文字並設定【靠左置中】
     def set_cell_text(cell, text):
         cell.text = text
-        # 設定水平置中
         for paragraph in cell.paragraphs:
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            # 字體稍微加粗或放大一點點，看起來更正式
+            # 【修正】改為靠左對齊，方便簽名
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             for run in paragraph.runs:
                 run.font.size = Pt(12)
 
-    set_cell_text(sig_table.cell(0, 0), "衛生股長")
-    set_cell_text(sig_table.cell(0, 1), "衛生糾察")
-    set_cell_text(sig_table.cell(1, 0), "導師簽名")
-    set_cell_text(sig_table.cell(1, 1), "衛生組核章")
+    set_cell_text(sig_table.cell(0, 0), " 衛生股長") # 前面加個空格比較不貼邊
+    set_cell_text(sig_table.cell(0, 1), " 衛生糾察")
+    set_cell_text(sig_table.cell(1, 0), " 導師簽名")
+    set_cell_text(sig_table.cell(1, 1), " 衛生組核章")
 
 # --- 輔助函式：建立任務清單區 ---
 def add_task_section(doc, tasks_df, standards_grouped, title_text):
@@ -137,29 +136,39 @@ def add_task_section(doc, tasks_df, standards_grouped, title_text):
 
     add_signature_block(doc)
 
-# --- 核心邏輯：生成單一班級的內容 (append 到 doc) ---
+# --- 核心邏輯：生成單一班級的內容 (含雙面列印補白頁邏輯) ---
 def append_class_content(doc, display_name, tasks_df, standards_grouped):
     df_indoor = tasks_df[tasks_df['檢查類型'] == '內掃教室']
     df_outdoor = tasks_df[tasks_df['檢查類型'] != '內掃教室']
 
-    # 內掃頁
+    # 1. 內掃頁
     if not df_indoor.empty:
         add_task_section(doc, df_indoor, standards_grouped, f"{display_name} - 內掃教室")
+        
+        # 【修正】內掃結束後，強制補一個空白頁 (為了雙面列印)
+        if not df_outdoor.empty:
+            doc.add_page_break() # 結束內掃頁 (現在在第1頁背面，準備印第2頁)
+            
+            # 加入一個空白段落，確保 Word 知道這一頁是存在的
+            p = doc.add_paragraph("") 
+            
+            doc.add_page_break() # 結束空白頁 (現在準備印第2張紙的正面)
     
-    # 內外掃中間的分頁
-    if not df_indoor.empty and not df_outdoor.empty:
-        doc.add_page_break()
-    
-    # 外掃頁
+    # 2. 外掃頁
     if not df_outdoor.empty:
         add_task_section(doc, df_outdoor, standards_grouped, f"{display_name} - 外掃區域")
+        
+        # 【修正】外掃結束後，也補一個空白頁 (確保下一班從新的一張紙開始)
+        # 這樣 A班外掃(正面) -> 背面空白 -> B班內掃(正面)
+        doc.add_page_break() 
+        p = doc.add_paragraph("") 
+        # 注意：這裡不加最後一個 page_break，交由迴圈控制，或者讓它自然留白
 
 # --- 主程式 ---
 df_classes, df_tasks, df_standards = load_data()
 
 if df_tasks is not None:
     
-    # --- 側邊欄 ---
     st.sidebar.header("📍 班級登入")
     
     if '年級' in df_classes.columns:
@@ -175,7 +184,6 @@ if df_tasks is not None:
         for index, row in classes_filter.iterrows()
     }
     
-    # --- 批次下載專區 (Admin) ---
     st.sidebar.markdown("---")
     st.sidebar.header("🖨️ 行政專用：批次列印")
     
@@ -183,41 +191,31 @@ if df_tasks is not None:
     if st.sidebar.button("📥 下載「全校」合併 Word 檔"):
         with st.spinner("正在生成全校表單，請稍候..."):
             doc = Document()
-            # 設定邊界
             section = doc.sections[0]
             section.top_margin = Cm(1.27)
             section.bottom_margin = Cm(1.27)
             section.left_margin = Cm(1.27)
             section.right_margin = Cm(1.27)
             
-            # 字型設定
             style = doc.styles['Normal']
             style.font.name = 'Times New Roman'
             style.element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
 
             standards_grouped = df_standards.groupby('檢查類型')
-            
-            # 取得全校班級清單 (排序)
             all_classes_sorted = df_classes.sort_values(by=['班級代碼'])
             
-            # 迴圈生成
-            first_page = True
             for idx, class_row in all_classes_sorted.iterrows():
                 class_id = class_row['班級代碼']
                 class_display = class_row['顯示名稱']
-                
-                # 篩選該班任務
                 class_tasks = df_tasks[df_tasks['負責班級'] == class_id]
                 
                 if not class_tasks.empty:
-                    # 如果不是第一頁，且上一班有內容，就要換頁
-                    if not first_page:
-                        doc.add_page_break()
-                    
+                    # 每一班都呼叫生成函式 (函式內已經包含補白頁邏輯)
                     append_class_content(doc, class_display, class_tasks, standards_grouped)
-                    first_page = False
-            
-            # 儲存
+                    
+                    # 確保班級之間有分頁 (因為 append_class_content 結尾可能沒有強制分頁到下一張紙)
+                    doc.add_page_break()
+
             bio = io.BytesIO()
             doc.save(bio)
             
@@ -228,7 +226,6 @@ if df_tasks is not None:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
 
-    # --- 右側主畫面 (單一班級檢視) ---
     selected_option = st.sidebar.selectbox("請選擇班級 (個別檢視)", list(class_options.keys()))
     current_class_id = class_options[selected_option]
     
@@ -242,7 +239,6 @@ if df_tasks is not None:
     my_tasks = df_tasks[df_tasks['負責班級'] == current_class_id]
     standards_grouped = df_standards.groupby('檢查類型')
     
-    # 單一班級下載按鈕
     if not my_tasks.empty:
         st.markdown("### 🖨️ 紙本檢核表下載 (單班)")
         
@@ -269,7 +265,6 @@ if df_tasks is not None:
         )
         st.markdown("---")
 
-    # 數位預覽
     st.markdown("### 📱 數位預覽")
     if my_tasks.empty:
         st.warning("目前無分配掃區。")
