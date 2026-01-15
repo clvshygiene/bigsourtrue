@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 import io
 from docx import Document 
-from docx.shared import Pt, Inches, RGBColor  # 👈 新增 RGBColor
+from docx.shared import Pt, Inches, RGBColor, Cm # 👈 新增 Cm 用來設定邊界
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
@@ -18,17 +18,14 @@ def load_data():
         # 👇 請確認這裡填寫的是正確的 Google 試算表連結
         google_sheet_url = "https://docs.google.com/spreadsheets/d/1jqpj-DOe1X2cf6cToWmtW19_0FdN3REioa34aXn4boA/edit?usp=sharing"
         
-        # 自動轉換為 Excel 下載連結
         if "/edit" in google_sheet_url:
             excel_url = google_sheet_url.replace("/edit", "/export?format=xlsx")
             excel_url = excel_url.split("?")[0] + "?format=xlsx"
         else:
             excel_url = google_sheet_url
 
-        # 讀取 Excel
         all_sheets = pd.read_excel(excel_url, sheet_name=None, dtype=str)
         
-        # 檢查必要分頁
         required_sheets = ['班級清單', '地點資料庫', '掃區分配總表', '檢查標準']
         for sheet in required_sheets:
             if sheet not in all_sheets:
@@ -40,7 +37,6 @@ def load_data():
         df_assign = all_sheets['掃區分配總表']
         df_standards = all_sheets['檢查標準']
         
-        # 資料合併
         df_full = pd.merge(df_assign, df_locations, on='地點ID', how='left')
         df_full = pd.merge(df_full, df_classes, left_on='負責班級', right_on='班級代碼', how='left')
         df_full = df_full.dropna(subset=['負責班級'])
@@ -51,96 +47,126 @@ def load_data():
         st.error(f"❌ 資料讀取失敗！錯誤訊息：{e}")
         return None, None, None
 
-# --- 2. 產生 Word 文件的函式 ---
-def generate_docx(class_name, tasks_df, standards_df):
-    doc = Document()
-    
-    # 設定中文字型
-    style = doc.styles['Normal']
-    style.font.name = 'Times New Roman'
-    style.element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
-    
-    # 標題
-    title = doc.add_heading(f'{class_name} 大掃除檢核表', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    p = doc.add_paragraph()
-    p.add_run(f"列印日期：{datetime.now().strftime('%Y-%m-%d')}\n").bold = True
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-    # 準備標準字典
-    standards_grouped = standards_df.groupby('檢查類型')
-
-    # 遍歷任務
-    for index, row in tasks_df.iterrows():
-        # 地點名稱
-        bldg = str(row['大樓']) if pd.notna(row['大樓']) else ""
-        floor = str(row['樓層']) if pd.notna(row['樓層']) else ""
-        detail = str(row['詳細位置']) if pd.notna(row['詳細位置']) else ""
-        full_name = f"{bldg} {floor} {detail}".strip()
-        
-        # 加入地點標題
-        doc.add_heading(f"📍 {full_name}", level=2)
-        
-        # 注意事項
-        note = row['特別注意事項']
-        if pd.notna(note) and str(note).strip() != "":
-            p = doc.add_paragraph()
-            run = p.add_run(f"⚠️ 注意：{note}")
-            # 👇 【修正】這裡改成正確的 RGBColor
-            run.font.color.rgb = RGBColor(255, 0, 0) 
-        
-        # 建立檢查表格
-        check_type = row['檢查類型']
-        if check_type in standards_grouped.groups:
-            type_df = standards_grouped.get_group(check_type)
-            
-            # 建立表格
-            table = doc.add_table(rows=1, cols=3)
-            table.style = 'Table Grid'
-            hdr_cells = table.rows[0].cells
-            hdr_cells[0].text = '子分類'
-            hdr_cells[1].text = '檢查項目'
-            hdr_cells[2].text = '檢查確認(打勾)'
-            
-            # 填入資料
-            if '子分類' in type_df.columns:
-                type_df_sorted = type_df.sort_values(by=['子分類'], na_position='first')
-                for item_row in type_df_sorted.itertuples():
-                    row_cells = table.add_row().cells
-                    sub_cat = str(item_row.子分類) if pd.notna(item_row.子分類) else "-"
-                    row_cells[0].text = sub_cat
-                    row_cells[1].text = item_row.檢查細項
-                    row_cells[2].text = "□"
-            else:
-                 for item_row in type_df.itertuples():
-                    row_cells = table.add_row().cells
-                    row_cells[0].text = "-"
-                    row_cells[1].text = item_row.檢查細項
-                    row_cells[2].text = "□"
-        else:
-            doc.add_paragraph(f"(未找到類型 {check_type} 的檢查標準)")
-            
-        doc.add_paragraph("\n") # 空行
-
-    # --- 簽名區塊 ---
-    doc.add_page_break()
-    doc.add_heading("簽名確認區", level=1)
+# --- 輔助函式：建立簽名區 ---
+def add_signature_block(doc):
+    doc.add_paragraph("\n") # 隔開一點距離
+    p = doc.add_heading("導師/幹部 確認簽名", level=3)
     
     sig_table = doc.add_table(rows=3, cols=2)
     sig_table.style = 'Table Grid'
     
     for row in sig_table.rows:
-        row.height = Inches(0.8)
+        row.height = Inches(0.6) # 簽名格高度
     
     sig_table.cell(0, 0).text = "衛生股長 (1)"
     sig_table.cell(0, 1).text = "衛生股長 (2)"
     sig_table.cell(1, 0).text = "衛生糾察 (1)"
     sig_table.cell(1, 1).text = "衛生糾察 (2)"
     sig_table.cell(2, 0).text = "導師簽名"
+    # 合併導師欄位
     a = sig_table.cell(2, 0)
     b = sig_table.cell(2, 1)
     a.merge(b)
+
+# --- 輔助函式：建立任務清單區 ---
+def add_task_section(doc, tasks_df, standards_grouped, title_text):
+    # 標題 (例如：餐飲科 - 內掃教室)
+    heading = doc.add_heading(title_text, level=1)
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # 檢查日期
+    p = doc.add_paragraph()
+    p.add_run(f"列印日期：{datetime.now().strftime('%Y-%m-%d')}\n").bold = True
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    # 遍歷每一個掃區 (如果掃兩間廁所，這裡就會跑兩次，產生兩個表)
+    for index, row in tasks_df.iterrows():
+        bldg = str(row['大樓']) if pd.notna(row['大樓']) else ""
+        floor = str(row['樓層']) if pd.notna(row['樓層']) else ""
+        detail = str(row['詳細位置']) if pd.notna(row['詳細位置']) else ""
+        full_name = f"{bldg} {floor} {detail}".strip()
+        
+        # 地點標題
+        doc.add_heading(f"📍 {full_name}", level=2)
+        
+        # 注意事項 (紅字)
+        note = row['特別注意事項']
+        if pd.notna(note) and str(note).strip() != "":
+            p = doc.add_paragraph()
+            run = p.add_run(f"⚠️ 注意：{note}")
+            run.font.color.rgb = RGBColor(255, 0, 0)
+        
+        # 建立表格
+        check_type = row['檢查類型']
+        if check_type in standards_grouped.groups:
+            type_df = standards_grouped.get_group(check_type)
+            
+            # 【修改 3】只有兩欄：項目、打勾
+            table = doc.add_table(rows=1, cols=2)
+            table.style = 'Table Grid'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = '檢查項目'
+            hdr_cells[1].text = '確認(打勾)'
+            
+            # 設定欄寬 (讓項目欄寬一點)
+            # 這裡只是大概比例，Word 會自動微調
+            table.columns[0].width = Inches(5.0)
+            table.columns[1].width = Inches(1.5)
+
+            # 填入資料
+            # 雖然不顯示子分類，但我們還是依照子分類排序，讓項目不會亂跳
+            if '子分類' in type_df.columns:
+                type_df_sorted = type_df.sort_values(by=['子分類'], na_position='first')
+            else:
+                type_df_sorted = type_df
+
+            for item_row in type_df_sorted.itertuples():
+                row_cells = table.add_row().cells
+                row_cells[0].text = item_row.檢查細項
+                row_cells[1].text = "□"
+        else:
+            doc.add_paragraph(f"(未找到類型 {check_type} 的檢查標準)")
+            
+        doc.add_paragraph("") # 空行隔開不同掃區
+
+    # 在該區域最後加上簽名檔
+    add_signature_block(doc)
+
+
+# --- 2. 產生 Word 文件的核心函式 ---
+def generate_docx(display_name, tasks_df, standards_df):
+    doc = Document()
+    
+    # 【修改 1】設定版面邊界為「窄」 (1.27cm)
+    section = doc.sections[0]
+    section.top_margin = Cm(1.27)
+    section.bottom_margin = Cm(1.27)
+    section.left_margin = Cm(1.27)
+    section.right_margin = Cm(1.27)
+    
+    # 設定中文字型
+    style = doc.styles['Normal']
+    style.font.name = 'Times New Roman'
+    style.element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
+    
+    standards_grouped = standards_df.groupby('檢查類型')
+
+    # 【修改 2】拆分「內掃」與「外掃」
+    # 邏輯：檢查類型叫做 "內掃教室" 的歸一類，其他歸另一類
+    df_indoor = tasks_df[tasks_df['檢查類型'] == '內掃教室']
+    df_outdoor = tasks_df[tasks_df['檢查類型'] != '內掃教室']
+
+    # --- 第一部分：內掃教室 ---
+    if not df_indoor.empty:
+        add_task_section(doc, df_indoor, standards_grouped, f"{display_name} - 內掃教室")
+    
+    # --- 分頁 ---
+    if not df_indoor.empty and not df_outdoor.empty:
+        doc.add_page_break()
+    
+    # --- 第二部分：外掃區 ---
+    if not df_outdoor.empty:
+        add_task_section(doc, df_outdoor, standards_grouped, f"{display_name} - 外掃區域")
 
     return doc
 
@@ -168,30 +194,38 @@ if df_tasks is not None:
 
     selected_option = st.sidebar.selectbox("請選擇班級", list(class_options.keys()))
     current_class_id = class_options[selected_option]
+    
+    # 【修改 5】只取出顯示名稱 (去除代碼)
+    # selected_option 格式為 "101 - 餐飲科" -> 取 "餐飲科"
+    if " - " in selected_option:
+        current_display_name = selected_option.split(" - ")[-1]
+    else:
+        current_display_name = selected_option
 
-    st.info(f"👋 歡迎 **{selected_option}**")
+    st.info(f"👋 歡迎 **{current_display_name}**")
     
     my_tasks = df_tasks[df_tasks['負責班級'] == current_class_id]
     
     # --- Word 下載按鈕 ---
     if not my_tasks.empty:
         st.markdown("### 🖨️ 紙本檢核表下載")
-        st.write("點擊下方按鈕下載 Word 檔，印出後完成簽名。")
+        st.write("點擊下方按鈕下載 Word 檔。檔案已自動分為「內掃」與「外掃」兩頁。")
         
-        doc = generate_docx(selected_option, my_tasks, df_standards)
+        # 傳入純名稱
+        doc = generate_docx(current_display_name, my_tasks, df_standards)
         bio = io.BytesIO()
         doc.save(bio)
         
         st.download_button(
             label="📥 下載 Word 檢核表 (.docx)",
             data=bio.getvalue(),
-            file_name=f"{selected_option}_大掃除檢核表.docx",
+            file_name=f"{current_display_name}_大掃除檢核表.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         st.markdown("---")
 
     # --- 數位預覽區 ---
-    st.markdown("### 📱 數位預覽 (僅供參考)")
+    st.markdown("### 📱 數位預覽")
     standards_grouped = df_standards.groupby('檢查類型')
 
     if my_tasks.empty:
