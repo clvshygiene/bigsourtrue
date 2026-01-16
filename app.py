@@ -19,7 +19,7 @@ st.title("🧹 114-2 校園大掃除檢核系統")
 def load_data():
     try:
         # 👇 請確認這裡填寫的是正確的 Google 試算表連結
-        google_sheet_url = "https://docs.google.com/spreadsheets/d/您的ID/edit?usp=sharing"
+        google_sheet_url = "https://docs.google.com/spreadsheets/d/1jqpj-DOe1X2cf6cToWmtW19_0FdN3REioa34aXn4boA/edit?usp=sharing"
         
         if "/edit" in google_sheet_url:
             excel_url = google_sheet_url.replace("/edit", "/export?format=xlsx")
@@ -379,3 +379,4 @@ if df_tasks is not None:
                 st.markdown("---")
             
             st.form_submit_button("數位送出 (測試用)")
+
