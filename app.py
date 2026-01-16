@@ -59,11 +59,11 @@ def set_cell_bg(cell, hex_color):
 def add_signature_block(doc):
     doc.add_paragraph("\n") 
     
-    sig_table = doc.add_table(rows=2, cols=2)
+    sig_table = doc.add_table(rows=1, cols=3)
     sig_table.style = 'Table Grid'
     
     for row in sig_table.rows:
-        row.height = Cm(2.2) 
+        row.height = Cm(1.6) 
         for cell in row.cells:
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     
@@ -76,10 +76,9 @@ def add_signature_block(doc):
                 run.font.name = 'Times New Roman'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
 
-    set_cell_text(sig_table.cell(0, 0), " 衛生股長") 
-    set_cell_text(sig_table.cell(0, 1), " 衛生糾察")
-    set_cell_text(sig_table.cell(1, 0), " 導師簽名")
-    set_cell_text(sig_table.cell(1, 1), " 衛生組核章")
+    set_cell_text(sig_table.cell(0, 0), " 1衛生股長簽名") 
+    set_cell_text(sig_table.cell(0, 1), " 2導師簽名")
+    set_cell_text(sig_table.cell(0, 2), " 3衛生糾察")
 
     # 底部提醒文字
     p = doc.add_paragraph()
@@ -379,4 +378,5 @@ if df_tasks is not None:
                 st.markdown("---")
             
             st.form_submit_button("數位送出 (測試用)")
+
 
